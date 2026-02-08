@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth, UserRole } from '../context/AuthContext';
 
+
+
+
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -9,6 +12,7 @@ interface AuthModalProps {
 type AuthMode = 'login' | 'signup';
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+  const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<AuthMode>('login');
   const [selectedRole, setSelectedRole] = useState<UserRole>('user');
   const [name, setName] = useState('');
@@ -16,21 +20,27 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [password, setPassword] = useState('');
   const { login, signup } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (mode === 'login') {
-      login(selectedRole, name || 'Guest User');
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setLoading(true);
+
+  try {
+    if (mode === "login") {
+      await login(email, password);
     } else {
-      signup(selectedRole, name, email);
+      await signup(selectedRole, name, email, password);
     }
-    
-    // Reset form
-    setName('');
-    setEmail('');
-    setPassword('');
+
+    alert(mode === "login" ? "Login Successful!" : "Signup Successful!");
     onClose();
-  };
+  } catch (error: any) {
+    alert(error.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   const resetForm = () => {
     setName('');
@@ -139,9 +149,10 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
             )}
 
-            <button type="submit" className="btn btn--primary" style={{ width: '100%' }}>
-              {mode === 'login' ? 'Sign In' : 'Create Account'}
+            <button type="submit" className="btn btn--primary" style={{ width: "100%" }} disabled={loading}>
+               {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
             </button>
+
           </form>
 
           <div style={{ 
