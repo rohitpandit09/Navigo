@@ -1,104 +1,181 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { events, states, TourEvent } from '../data/mockData';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useMemo } from "react";
+import { useAuth } from "../context/AuthContext";
+import { auth, db } from "../firebase/firebaseConfig";
+
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  Timestamp,
+} from "firebase/firestore";
+
+const states = [
+  "All States",
+  "Maharashtra",
+  "Delhi",
+  "Rajasthan",
+  "Goa",
+  "Gujarat",
+  "Karnataka",
+  "Tamil Nadu",
+  "Uttar Pradesh",
+  "West Bengal",
+  "Madhya Pradesh",
+];
+
+interface EventType {
+  id: string;
+  name: string;
+  description: string;
+  location: string;
+  state: string;
+  date: Date;
+  images: string[];
+  timeline: string;
+  createdByName: string;
+}
 
 const Events: React.FC = () => {
-  const [activeCategory, setActiveCategory] = useState<'all' | 'ongoing' | 'upcoming' | 'past'>('all');
-  const [selectedState, setSelectedState] = useState('All States');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [localEvents, setLocalEvents] = useState<TourEvent[]>(events);
-  const [currentImageIndex, setCurrentImageIndex] = useState<{ [key: number]: number }>({});
-  
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, userName } = useAuth();
 
-  // New event form state
+  const [events, setEvents] = useState<EventType[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedState, setSelectedState] = useState("All States");
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const [currentImageIndex, setCurrentImageIndex] = useState<{
+    [key: string]: number;
+  }>({});
+
   const [newEvent, setNewEvent] = useState({
-    name: '',
-    description: '',
-    location: '',
-    state: 'Rajasthan',
-    date: '',
-    images: ''
+    name: "",
+    description: "",
+    location: "",
+    state: "Maharashtra",
+    date: "",
+    images: "",
+    timeline: "",
   });
 
-  // Image slideshow effect
+  // ✅ FETCH EVENTS FROM FIRESTORE (REAL DATA)
+  useEffect(() => {
+    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      const eventList: EventType[] = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data();
+
+        return {
+          id: docSnap.id,
+          name: data.name,
+          description: data.description,
+          location: data.location,
+          state: data.state,
+          date: data.date?.toDate ? data.date.toDate() : new Date(),
+          images: data.images || [],
+          timeline: data.timeline || "",
+          createdByName: data.createdByName || "Anonymous",
+        };
+      });
+
+      setEvents(eventList);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // ✅ IMAGE SLIDESHOW FOR EVENTS
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentImageIndex((prev) => {
         const updated = { ...prev };
-        localEvents.forEach((event) => {
+
+        events.forEach((event) => {
           if (event.images.length > 1) {
-            updated[event.id] = ((prev[event.id] || 0) + 1) % event.images.length;
+            updated[event.id] =
+              ((prev[event.id] || 0) + 1) % event.images.length;
           }
         });
+
         return updated;
       });
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [localEvents]);
+  }, [events]);
 
+  // ✅ FILTER EVENTS
   const filteredEvents = useMemo(() => {
-    return localEvents.filter((event) => {
-      const matchesCategory = activeCategory === 'all' || event.category === activeCategory;
-      const matchesState = selectedState === 'All States' || event.state === selectedState;
-      const matchesSearch = event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    return events.filter((event) => {
+      const matchState =
+        selectedState === "All States" || event.state === selectedState;
+
+      const matchSearch =
+        event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         event.location.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCategory && matchesState && matchesSearch;
+
+      return matchState && matchSearch;
     });
-  }, [localEvents, activeCategory, selectedState, searchQuery]);
+  }, [events, selectedState, searchQuery]);
 
-  const handleAddEvent = (e: React.FormEvent) => {
+  // ✅ ADD EVENT TO FIRESTORE
+  const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const eventDate = new Date(newEvent.date);
-    const now = new Date();
-    let category: 'ongoing' | 'upcoming' | 'past' = 'upcoming';
-    
-    if (eventDate < now) {
-      category = 'past';
-    } else if (eventDate.toDateString() === now.toDateString()) {
-      category = 'ongoing';
+
+    if (!isAuthenticated) {
+      alert("Please login to add an event!");
+      return;
     }
 
-    const imageUrls = newEvent.images.split(',').map(url => url.trim()).filter(Boolean);
-    if (imageUrls.length === 0) {
-      imageUrls.push('https://images.unsplash.com/photo-1545987796-200677ee1011?w=800&q=80');
+    try {
+      const eventDate = new Date(newEvent.date);
+
+      const imageUrls = newEvent.images
+        .split(",")
+        .map((url) => url.trim())
+        .filter(Boolean);
+
+      if (imageUrls.length === 0) {
+        imageUrls.push(
+          "https://images.unsplash.com/photo-1545987796-200677ee1011?w=800&q=80"
+        );
+      }
+
+      const user = auth.currentUser;
+
+      await addDoc(collection(db, "events"), {
+        name: newEvent.name,
+        description: newEvent.description,
+        location: newEvent.location,
+        state: newEvent.state,
+        date: Timestamp.fromDate(eventDate),
+        images: imageUrls,
+        timeline: newEvent.timeline,
+        createdBy: user?.uid,
+        createdByName: userName || "User",
+        createdAt: serverTimestamp(),
+      });
+
+      alert("✅ Event Added Successfully!");
+
+      setNewEvent({
+        name: "",
+        description: "",
+        location: "",
+        state: "Maharashtra",
+        date: "",
+        images: "",
+        timeline: "",
+      });
+
+      setShowAddForm(false);
+    } catch (error: any) {
+      alert("❌ Failed to add event: " + error.message);
     }
-
-    const newEventData: TourEvent = {
-      id: Date.now(),
-      name: newEvent.name,
-      description: newEvent.description,
-      location: newEvent.location,
-      state: newEvent.state,
-      date: eventDate,
-      images: imageUrls,
-      category,
-      organizer: 'User Event',
-      price: 'TBD'
-    };
-
-    setLocalEvents([newEventData, ...localEvents]);
-    setNewEvent({ name: '', description: '', location: '', state: 'Rajasthan', date: '', images: '' });
-    setShowAddForm(false);
   };
-
-  const formatDate = (date: Date) => {
-    return new Intl.DateTimeFormat('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    }).format(date);
-  };
-
-  const categories = [
-    { key: 'all', label: 'All Events' },
-    { key: 'ongoing', label: 'Ongoing' },
-    { key: 'upcoming', label: 'Upcoming' },
-    { key: 'past', label: 'Past' }
-  ];
 
   return (
     <section className="section section--white" id="events">
@@ -107,51 +184,48 @@ const Events: React.FC = () => {
           <p className="section__subtitle">Cultural Calendar</p>
           <h2 className="section__title">Events & Festivals</h2>
           <p className="section__description">
-            Experience India's vibrant cultural celebrations and heritage festivals
+            Events posted by real users and guides in real-time.
           </p>
         </div>
 
-        {/* Category Tabs */}
-        <div className="filter-tabs">
-          {categories.map((cat) => (
-            <button
-              key={cat.key}
-              className={`filter-tab ${activeCategory === cat.key ? 'filter-tab--active' : ''}`}
-              onClick={() => setActiveCategory(cat.key as typeof activeCategory)}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
+        {/* SEARCH + FILTER + ADD BUTTON */}
+        <div
+          style={{
+            display: "flex",
+            gap: "15px",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            marginBottom: "25px",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search events..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              padding: "10px",
+              borderRadius: "8px",
+              border: "1px solid #ccc",
+              flex: 1,
+              minWidth: "200px",
+            }}
+          />
 
-        {/* Search & Add Event */}
-        <div style={{ 
-          display: 'flex', 
-          gap: 'var(--spacing-md)', 
-          marginBottom: 'var(--spacing-2xl)',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div className="search-bar" style={{ flex: 1, marginBottom: 0 }}>
-            <input
-              type="text"
-              className="search-bar__input"
-              placeholder="Search events..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <select
-              className="search-bar__select"
-              value={selectedState}
-              onChange={(e) => setSelectedState(e.target.value)}
-            >
-              {states.map((state) => (
-                <option key={state} value={state}>{state}</option>
-              ))}
-            </select>
-          </div>
-          
+          <select
+            value={selectedState}
+            onChange={(e) => setSelectedState(e.target.value)}
+            style={{
+              padding: "10px",
+              borderRadius: "8px",
+              border: "1px solid #ccc",
+            }}
+          >
+            {states.map((state) => (
+              <option key={state}>{state}</option>
+            ))}
+          </select>
+
           {isAuthenticated && (
             <button
               className="btn btn--primary"
@@ -162,14 +236,23 @@ const Events: React.FC = () => {
           )}
         </div>
 
-        {/* Add Event Form Modal */}
+        {/* ADD EVENT FORM MODAL */}
         {showAddForm && (
-          <div className="modal-overlay modal-overlay--open" onClick={() => setShowAddForm(false)}>
+          <div
+            className="modal-overlay modal-overlay--open"
+            onClick={() => setShowAddForm(false)}
+          >
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal__header">
                 <h3 className="modal__title">Add New Event</h3>
-                <button className="modal__close" onClick={() => setShowAddForm(false)}>×</button>
+                <button
+                  className="modal__close"
+                  onClick={() => setShowAddForm(false)}
+                >
+                  ×
+                </button>
               </div>
+
               <div className="modal__body">
                 <form onSubmit={handleAddEvent}>
                   <div className="form-group">
@@ -178,62 +261,106 @@ const Events: React.FC = () => {
                       type="text"
                       className="form-input"
                       value={newEvent.name}
-                      onChange={(e) => setNewEvent({ ...newEvent, name: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, name: e.target.value })
+                      }
                       required
                     />
                   </div>
+
                   <div className="form-group">
                     <label className="form-label">Description</label>
                     <textarea
                       className="form-input form-textarea"
                       value={newEvent.description}
-                      onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({
+                          ...newEvent,
+                          description: e.target.value,
+                        })
+                      }
                       required
                     />
                   </div>
+
                   <div className="form-group">
                     <label className="form-label">Location</label>
                     <input
                       type="text"
                       className="form-input"
                       value={newEvent.location}
-                      onChange={(e) => setNewEvent({ ...newEvent, location: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, location: e.target.value })
+                      }
                       required
                     />
                   </div>
+
                   <div className="form-group">
                     <label className="form-label">State</label>
                     <select
-                      className="form-input form-select"
+                      className="form-input"
                       value={newEvent.state}
-                      onChange={(e) => setNewEvent({ ...newEvent, state: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, state: e.target.value })
+                      }
                     >
-                      {states.filter(s => s !== 'All States').map((state) => (
-                        <option key={state} value={state}>{state}</option>
-                      ))}
+                      {states
+                        .filter((s) => s !== "All States")
+                        .map((state) => (
+                          <option key={state} value={state}>
+                            {state}
+                          </option>
+                        ))}
                     </select>
                   </div>
+
                   <div className="form-group">
-                    <label className="form-label">Date</label>
+                    <label className="form-label">Event Date</label>
                     <input
                       type="date"
                       className="form-input"
                       value={newEvent.date}
-                      onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, date: e.target.value })
+                      }
                       required
                     />
                   </div>
+
                   <div className="form-group">
-                    <label className="form-label">Image URLs (comma separated)</label>
+                    <label className="form-label">
+                      Images (comma separated URLs)
+                    </label>
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="https://... , https://..."
+                      placeholder="https://img1 , https://img2"
                       value={newEvent.images}
-                      onChange={(e) => setNewEvent({ ...newEvent, images: e.target.value })}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, images: e.target.value })
+                      }
                     />
                   </div>
-                  <button type="submit" className="btn btn--primary" style={{ width: '100%' }}>
+
+                  <div className="form-group">
+                    <label className="form-label">Event Timeline</label>
+                    <textarea
+                      className="form-input form-textarea"
+                      placeholder="10AM - Entry, 2PM - Dance, 6PM - Closing"
+                      value={newEvent.timeline}
+                      onChange={(e) =>
+                        setNewEvent({ ...newEvent, timeline: e.target.value })
+                      }
+                      required
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    style={{ width: "100%" }}
+                  >
                     Add Event
                   </button>
                 </form>
@@ -242,86 +369,59 @@ const Events: React.FC = () => {
           </div>
         )}
 
-        {/* Events Grid */}
+        {/* EVENTS CARDS */}
         <div className="grid grid--3">
-          {filteredEvents.map((event, index) => (
-            <div
-              key={event.id}
-              className="card event-card animate-fade-in"
-              style={{ animationDelay: `${index * 0.1}s`, opacity: 0 }}
-            >
-              <div style={{ position: 'relative', height: '200px', overflow: 'hidden' }}>
-                {event.images.map((img, imgIndex) => (
+          {filteredEvents.map((event) => (
+            <div key={event.id} className="card event-card">
+              <div style={{ position: "relative", height: "200px" }}>
+                {event.images.map((img, idx) => (
                   <img
-                    key={imgIndex}
+                    key={idx}
                     src={img}
-                    alt={`${event.name} ${imgIndex + 1}`}
+                    alt="event"
                     style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      opacity: (currentImageIndex[event.id] || 0) === imgIndex ? 1 : 0,
-                      transition: 'opacity 0.8s ease'
+                      position: "absolute",
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      opacity:
+                        (currentImageIndex[event.id] || 0) === idx ? 1 : 0,
+                      transition: "opacity 0.8s ease",
                     }}
-                    loading="lazy"
                   />
                 ))}
-                <div className="event-card__date">
-                  <div className="event-card__date-day">
-                    {event.date.getDate()}
-                  </div>
-                  <div className="event-card__date-month">
-                    {event.date.toLocaleString('default', { month: 'short' })}
-                  </div>
-                </div>
               </div>
-              
+
               <div className="card__content">
-                <span className={`event-card__category event-card__category--${event.category}`}>
-                  {event.category}
-                </span>
                 <h4 className="card__title">{event.name}</h4>
-                <p className="event-card__location">
+
+                <p style={{ fontSize: "0.9rem", color: "gray" }}>
                   📍 {event.location}, {event.state}
                 </p>
-                <p style={{ 
-                  fontSize: '0.9rem', 
-                  color: 'var(--color-gray)',
-                  marginTop: 'var(--spacing-sm)',
-                  marginBottom: 'var(--spacing-md)'
-                }}>
+
+                <p style={{ marginTop: "10px" }}>
                   {event.description.slice(0, 100)}...
                 </p>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  paddingTop: 'var(--spacing-md)',
-                  borderTop: '1px solid var(--color-gray-lighter)'
-                }}>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--color-gray)' }}>
-                    {formatDate(event.date)}
-                  </span>
-                  <span style={{ 
-                    fontSize: '0.9rem', 
-                    fontWeight: 600, 
-                    color: 'var(--color-primary)' 
-                  }}>
-                    {event.price}
-                  </span>
-                </div>
+
+                <p style={{ marginTop: "10px", fontSize: "0.85rem" }}>
+                  🕒 {event.timeline.slice(0, 80)}...
+                </p>
+
+                <p style={{ marginTop: "10px", fontSize: "0.85rem", color: "gray" }}>
+                  Posted by: <b>{event.createdByName}</b>
+                </p>
+
+                <p style={{ marginTop: "5px", fontSize: "0.85rem", color: "gray" }}>
+                  Date: {event.date.toDateString()}
+                </p>
               </div>
             </div>
           ))}
         </div>
 
         {filteredEvents.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 'var(--spacing-3xl)', color: 'var(--color-gray)' }}>
-            <p style={{ fontSize: '3rem', marginBottom: 'var(--spacing-md)' }}>📅</p>
-            <p>No events found in this category</p>
+          <div style={{ textAlign: "center", padding: "40px", color: "gray" }}>
+            <h3>No Events Found</h3>
           </div>
         )}
       </div>
