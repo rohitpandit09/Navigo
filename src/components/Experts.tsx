@@ -2,8 +2,16 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Expert } from "../types/expert";
 
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { db } from "../firebase/firebaseConfig";
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  addDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+
+import { db, auth } from "../firebase/firebaseConfig";
 
 interface ExpertsProps {
   onBookingRequest: (expert: Expert) => void;
@@ -13,7 +21,7 @@ const Experts: React.FC<ExpertsProps> = ({ onBookingRequest }) => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [experts, setExperts] = useState<Expert[]>([]);
 
-  const { isAuthenticated, bookedExpertId } = useAuth();
+  const { isAuthenticated, bookedExpertId, userName, bookExpert } = useAuth();
 
   const slidesPerView = 3;
   const maxSlide = Math.max(0, experts.length - slidesPerView);
@@ -43,12 +51,46 @@ const Experts: React.FC<ExpertsProps> = ({ onBookingRequest }) => {
     return () => clearInterval(interval);
   }, [nextSlide]);
 
+  // ✅ Send Booking Request to Firestore
+  const sendBookingRequest = async (expert: Expert) => {
+    const user = auth.currentUser;
+
+    if (!user) {
+      alert("Please login first");
+      return;
+    }
+
+    try {
+      await addDoc(collection(db, "bookingRequests"), {
+        userId: user.uid,
+        userName: userName,
+        expertId: expert.id,
+        expertName: expert.name,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+
+      // optional: mark locally booked
+      bookExpert(expert.id);
+
+      alert("✅ Booking request sent successfully!");
+    } catch (error: any) {
+      alert("❌ Failed to send booking request: " + error.message);
+    }
+  };
+
   const handleBook = (expert: Expert) => {
     if (!isAuthenticated) {
       alert("Please sign in to book an expert");
       return;
     }
+
+    // If you still want to use your old booking popup logic
+    // you can keep this:
     onBookingRequest(expert);
+
+    // 🔥 This sends real booking request to Firestore
+    sendBookingRequest(expert);
   };
 
   const renderStars = (rating: number) => {
@@ -102,6 +144,7 @@ const Experts: React.FC<ExpertsProps> = ({ onBookingRequest }) => {
                       </div>
 
                       <h4 className="card__title">{expert.name}</h4>
+
                       <p
                         className="card__subtitle"
                         style={{ justifyContent: "center" }}
@@ -147,7 +190,7 @@ const Experts: React.FC<ExpertsProps> = ({ onBookingRequest }) => {
                           disabled={expert.status === "busy"}
                         >
                           {bookedExpertId === expert.id
-                            ? "✓ Booked"
+                            ? "✓ Requested"
                             : "Book Expert"}
                         </button>
 
