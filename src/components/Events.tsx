@@ -62,30 +62,31 @@ const Events: React.FC = () => {
 
   // ✅ FETCH EVENTS FROM FIRESTORE (REAL DATA)
   useEffect(() => {
-    const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
+  const q = query(collection(db, "events"), orderBy("date", "desc"));
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      const eventList: EventType[] = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data();
+  const unsub = onSnapshot(q, (snapshot) => {
+    const eventList: EventType[] = snapshot.docs.map((docSnap) => {
+      const data = docSnap.data();
 
-        return {
-          id: docSnap.id,
-          name: data.name,
-          description: data.description,
-          location: data.location,
-          state: data.state,
-          date: data.date?.toDate ? data.date.toDate() : new Date(),
-          images: data.images || [],
-          timeline: data.timeline || "",
-          createdByName: data.createdByName || "Anonymous",
-        };
-      });
-
-      setEvents(eventList);
+      return {
+        id: docSnap.id,
+        name: data.name || "",
+        description: data.description || "",
+        location: data.location || "",
+        state: data.state || "",
+        date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
+        images: data.images || [],
+        timeline: data.timeline || "",
+        createdByName: data.createdByName || "Anonymous",
+      };
     });
 
-    return () => unsub();
-  }, []);
+    setEvents(eventList);
+  });
+
+  return () => unsub();
+}, []);
+
 
   // ✅ IMAGE SLIDESHOW FOR EVENTS
   useEffect(() => {
