@@ -62,7 +62,7 @@ const Events: React.FC = () => {
 
   // ✅ FETCH EVENTS FROM FIRESTORE (REAL DATA)
   useEffect(() => {
-  const q = query(collection(db, "events"), orderBy("date", "desc"));
+  const q = query(collection(db, "monuments"), orderBy("date", "desc"));
 
   const unsub = onSnapshot(
     q,
