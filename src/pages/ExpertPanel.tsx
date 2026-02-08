@@ -13,6 +13,8 @@ import {
   where,
 } from "firebase/firestore";
 
+import { onAuthStateChanged } from "firebase/auth";
+
 interface BookingRequest {
   id: string;
   userId: string;
@@ -36,58 +38,80 @@ const ExpertPanel = () => {
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 🔥 Booking Requests
   const [requests, setRequests] = useState<BookingRequest[]>([]);
+  const [expertUid, setExpertUid] = useState<string | null>(null);
 
-  // Load existing expert data if already saved
+  // ✅ Get Expert UID properly (Fix for white screen in deployed site)
   useEffect(() => {
-    const loadExpertData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      const docRef = doc(db, "experts", user.uid);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-
-        setName(data.name || "");
-        setAvatar(data.avatar || "");
-        setLocation(data.location || "");
-        setLanguages((data.languages || []).join(", "));
-        setDescription(data.description || "");
-        setSpecialization(data.specialization || "");
-        setToursCompleted(data.toursCompleted || 0);
-        setIsOnline(data.isOnline || false);
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setExpertUid(user.uid);
+      } else {
+        setExpertUid(null);
       }
-    };
-
-    loadExpertData();
-  }, []);
-
-  // 🔥 Listen to Booking Requests in Real-Time
-  useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
-
-    const q = query(
-      collection(db, "bookingRequests"),
-      where("expertId", "==", user.uid),
-      where("status", "==", "pending")
-    );
-
-    const unsub = onSnapshot(q, (snapshot) => {
-      const reqList: BookingRequest[] = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<BookingRequest, "id">),
-      }));
-
-      setRequests(reqList);
     });
 
     return () => unsub();
   }, []);
 
+  // ✅ Load expert profile data
+  useEffect(() => {
+    if (!expertUid) return;
+
+    const loadExpertData = async () => {
+      try {
+        const docRef = doc(db, "experts", expertUid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+
+          setName(data.name || "");
+          setAvatar(data.avatar || "");
+          setLocation(data.location || "");
+          setLanguages((data.languages || []).join(", "));
+          setDescription(data.description || "");
+          setSpecialization(data.specialization || "");
+          setToursCompleted(data.toursCompleted || 0);
+          setIsOnline(data.isOnline || false);
+        }
+      } catch (error) {
+        console.log("Error loading expert profile:", error);
+      }
+    };
+
+    loadExpertData();
+  }, [expertUid]);
+
+  // ✅ Real-time Booking Requests Listener
+  useEffect(() => {
+    if (!expertUid) return;
+
+    const q = query(
+      collection(db, "bookingRequests"),
+      where("expertId", "==", expertUid),
+      where("status", "==", "pending")
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const reqList: BookingRequest[] = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<BookingRequest, "id">),
+        }));
+
+        setRequests(reqList);
+      },
+      (error) => {
+        console.log("Booking request listener error:", error);
+      }
+    );
+
+    return () => unsub();
+  }, [expertUid]);
+
+  // ✅ Prevent white screen by showing loading state
   if (!isAuthenticated) {
     return <h2 style={{ padding: "40px" }}>Please Login first</h2>;
   }
@@ -100,14 +124,15 @@ const ExpertPanel = () => {
     );
   }
 
-  const handleSaveProfile = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
+  if (!expertUid) {
+    return <h2 style={{ padding: "40px" }}>Loading Expert Panel...</h2>;
+  }
 
+  const handleSaveProfile = async () => {
     setLoading(true);
 
     try {
-      await setDoc(doc(db, "experts", user.uid), {
+      await setDoc(doc(db, "experts", expertUid), {
         name,
         avatar,
         location,
@@ -130,13 +155,10 @@ const ExpertPanel = () => {
   };
 
   const handleGoOnline = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-
     setLoading(true);
 
     try {
-      await updateDoc(doc(db, "experts", user.uid), {
+      await updateDoc(doc(db, "experts", expertUid), {
         isOnline: true,
         status: "free",
       });
@@ -151,13 +173,10 @@ const ExpertPanel = () => {
   };
 
   const handleGoOffline = async () => {
-    const user = auth.currentUser;
-    if (!user) return;
-
     setLoading(true);
 
     try {
-      await updateDoc(doc(db, "experts", user.uid), {
+      await updateDoc(doc(db, "experts", expertUid), {
         isOnline: false,
       });
 
@@ -170,7 +189,6 @@ const ExpertPanel = () => {
     setLoading(false);
   };
 
-  // ✅ Accept Booking Request
   const acceptRequest = async (requestId: string) => {
     setLoading(true);
 
@@ -187,7 +205,6 @@ const ExpertPanel = () => {
     setLoading(false);
   };
 
-  // ❌ Reject Booking Request
   const rejectRequest = async (requestId: string) => {
     setLoading(true);
 
@@ -208,7 +225,6 @@ const ExpertPanel = () => {
     <div style={{ padding: "40px", maxWidth: "700px", margin: "auto" }}>
       <h2 style={{ marginBottom: "20px" }}>🎓 Expert Panel</h2>
 
-      {/* Expert Profile Form */}
       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
         <input
           type="text"
@@ -274,7 +290,6 @@ const ExpertPanel = () => {
         )}
       </div>
 
-      {/* 🔥 Booking Requests Section */}
       <div style={{ marginTop: "40px" }}>
         <h3>📩 Booking Requests</h3>
 
