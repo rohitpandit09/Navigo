@@ -33,7 +33,7 @@ const Navbar: React.FC<NavbarProps> = ({ onNavigate, activeSection, onAuthClick 
       <nav className={`navbar ${isScrolled ? 'navbar--solid' : 'navbar--transparent'}`}>
         <div className="navbar__logo">
           <span className="navbar__logo-icon">🏛️</span>
-          Incredible India
+          NaviGO
         </div>
 
         <ul className="navbar__links">
